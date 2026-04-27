@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Cpu, Save, Server, ServerCrash, Settings, Terminal, Zap } from "lucide-react";
-import { useState } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
 // Initialize Gemini (API Key injected by AI Studio Vite config)
@@ -23,6 +23,8 @@ const DEFAULT_METRICS: MetricsPayload = {
 interface AdviceResponse {
   scale_delta: number;
   rationale: string;
+  cost_impact_usd: number;
+  bottleneck_warning: string;
 }
 
 export default function App() {
@@ -57,7 +59,7 @@ export default function App() {
         model: 'gemini-3.1-pro-preview',
         contents: `Autoscaling state JSON:\n${payloadString}`,
         config: {
-          systemInstruction: "You are an SRE autoscaling copilot. Your task is to analyze the cloud infrastructure metrics provided in JSON and decide exactly ONE action for pod scaling. Always respond in JSON format with keys 'scale_delta' and 'rationale'. The 'scale_delta' must be an integer indicating how many pods to add or remove, clamped strictly within [-2, -1, 0, 1, 2].",
+          systemInstruction: "You are an SRE autoscaling copilot. Your task is to analyze the cloud infrastructure metrics provided in JSON and decide exactly ONE action for pod scaling. Always respond in JSON format with keys 'scale_delta', 'rationale', 'cost_impact_usd', and 'bottleneck_warning'. The 'scale_delta' must be an integer indicating how many pods to add or remove, clamped strictly within [-2, -1, 0, 1, 2]. Evaluate the financial impact of this decision and provide a short warning if any metric indicates an impending bottleneck.",
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -69,9 +71,17 @@ export default function App() {
               rationale: {
                 type: Type.STRING,
                 description: "A short, professional SRE-style explanation for this operational scaling action."
+              },
+              cost_impact_usd: {
+                type: Type.NUMBER,
+                description: "The estimated hourly cost change in USD (e.g., +2.50 for scaling up, -1.25 for scaling down)."
+              },
+              bottleneck_warning: {
+                type: Type.STRING,
+                description: "A brief warning about potential bottlenecks (e.g. CPU saturation, high latency). If metrics are healthy, return 'None'."
               }
             },
-            required: ["scale_delta", "rationale"]
+            required: ["scale_delta", "rationale", "cost_impact_usd", "bottleneck_warning"]
           }
         }
       });
@@ -84,7 +94,9 @@ export default function App() {
       const result = JSON.parse(rawJson) as AdviceResponse;
       setAdvice({
         scale_delta: Math.max(-2, Math.min(2, result.scale_delta || 0)),
-        rationale: result.rationale || "No rationale provided by model."
+        rationale: result.rationale || "No rationale provided by model.",
+        cost_impact_usd: result.cost_impact_usd || 0,
+        bottleneck_warning: result.bottleneck_warning || "None"
       });
       
     } catch (err: any) {
@@ -230,15 +242,35 @@ export default function App() {
                        </div>
                     </div>
                     
-                    <div className="mt-auto relative z-0">
-                      <div className="absolute top-[-60px] right-0 bg-indigo-50 p-4 rounded-2xl border border-indigo-100 shadow-sm md:block hidden rotate-2 transform origin-bottom-right">
-                        <div className="text-slate-400 text-[9px] font-bold uppercase tracking-wider mb-1">Reward Function</div>
-                        <div className="text-xs font-mono font-bold text-indigo-700">E = Σ (R_t + γV)</div>
+                    <div className="mt-auto relative z-0 flex flex-col gap-4">
+                      
+                      {advice.bottleneck_warning && advice.bottleneck_warning !== "None" && (
+                        <div className="bg-red-50 p-4 rounded-2xl border border-red-100 flex items-start gap-3 w-full">
+                          <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <span className="text-[10px] text-red-500 font-bold uppercase tracking-widest block mb-1">Issue Detected</span>
+                            <p className="text-xs text-red-700 font-medium">{advice.bottleneck_warning}</p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex gap-4">
+                        <div className="flex-1">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-2">Autoscaler Rationale</span>
+                          <p className="text-[14px] leading-relaxed text-slate-600 bg-slate-50 p-6 rounded-3xl border border-slate-100 font-medium whitespace-pre-wrap min-h-[100px]">
+                            {advice.rationale}
+                          </p>
+                        </div>
+                        <div className="w-1/3 flex flex-col justify-start">
+                           <div className="bg-indigo-50 p-5 rounded-3xl border border-indigo-100 h-full flex flex-col justify-center items-center text-center">
+                             <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest block mb-2">Est. Hourly Impact</span>
+                             <span className={`text-2xl font-bold ${advice.cost_impact_usd > 0 ? 'text-red-500' : advice.cost_impact_usd < 0 ? 'text-emerald-500' : 'text-slate-500'}`}>
+                               {advice.cost_impact_usd > 0 ? '+' : ''}${advice.cost_impact_usd.toFixed(2)}
+                             </span>
+                           </div>
+                        </div>
                       </div>
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest block mb-3">Autoscaler Rationale</span>
-                      <p className="text-[14px] leading-relaxed text-slate-600 bg-slate-50 p-6 rounded-3xl border border-slate-100 font-medium">
-                        {advice.rationale}
-                      </p>
+
                     </div>
                  </motion.div>
                ) : (
