@@ -1,0 +1,6 @@
+{
+  "name": "AutoScaleOps AI Prototype",
+  "description": "A cloud autoscaling simulator where a Gemini AI agent acts like an SRE to recommend scale actions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
