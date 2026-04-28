@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { Activity, AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Cpu, Save, Server, ServerCrash, Settings, Terminal, Zap } from "lucide-react";
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -26,6 +25,20 @@ interface AdviceResponse {
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
+interface AdviceApiResponse {
+  advice?: AdviceResponse;
+  fallback?: boolean;
+  error?: string;
+  model?: string;
+}
+
+const createFallbackAdvice = (metrics: MetricsPayload): AdviceResponse => ({
+  scale_delta: metrics.cpu_utilization > 0.8 ? 2 : metrics.cpu_utilization < 0.2 ? -1 : 0,
+  rationale: `[FALLBACK] Based on the CPU utilization of ${(metrics.cpu_utilization * 100).toFixed(0)}% and latency of ${metrics.latency_ms}ms, the system indicates a ${metrics.cpu_utilization > 0.8 ? 'scale-up' : metrics.cpu_utilization < 0.2 ? 'scale-down' : 'hold'} operation is optimal to meet SLA targets while optimizing cost.`,
+  cost_impact_usd: metrics.cpu_utilization > 0.8 ? 2.50 : metrics.cpu_utilization < 0.2 ? -1.25 : 0.00,
+  bottleneck_warning: metrics.latency_ms > 500 ? "High Latency Detected: Requests may be dropping." : metrics.cpu_utilization > 0.9 ? "CPU Saturation Imminent." : "None",
+});
+
 export default function App() {
   const [metrics, setMetrics] = useState<MetricsPayload>(DEFAULT_METRICS);
   const [loading, setLoading] = useState(false);
@@ -48,73 +61,39 @@ export default function App() {
     setError(null);
     setAdvice(null);
     try {
-      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("VITE_GEMINI_API_KEY environment variable is missing.");
-      }
-      
-      const ai = new GoogleGenAI({ apiKey });
-      const payloadString = JSON.stringify(metrics, null, 2);
-      
-      const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
-        contents: `Autoscaling state JSON:\n${payloadString}`,
-        config: {
-          systemInstruction: "You are an SRE autoscaling copilot. Your task is to analyze the cloud infrastructure metrics provided in JSON and decide exactly ONE action for pod scaling. Always respond in JSON format with keys 'scale_delta', 'rationale', 'cost_impact_usd', and 'bottleneck_warning'. The 'scale_delta' must be an integer indicating how many pods to add or remove, clamped strictly within [-2, -1, 0, 1, 2]. Evaluate the financial impact of this decision and provide a short warning if any metric indicates an impending bottleneck.",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              scale_delta: {
-                type: Type.INTEGER,
-                description: "The number of pods to scale up or down. Values allowed: -2, -1, 0, 1, 2"
-              },
-              rationale: {
-                type: Type.STRING,
-                description: "A short, professional SRE-style explanation for this operational scaling action."
-              },
-              cost_impact_usd: {
-                type: Type.NUMBER,
-                description: "The estimated hourly cost change in USD (e.g., +2.50 for scaling up, -1.25 for scaling down)."
-              },
-              bottleneck_warning: {
-                type: Type.STRING,
-                description: "A brief warning about potential bottlenecks (e.g. CPU saturation, high latency). If metrics are healthy, return 'None'."
-              }
-            },
-            required: ["scale_delta", "rationale", "cost_impact_usd", "bottleneck_warning"]
-          }
-        }
+      const response = await fetch("/api/advice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(metrics),
       });
 
-      if (!response.text) {
-        throw new Error("Received empty response from AI model.");
+      const data = (await response.json()) as AdviceApiResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error || `Request failed with status ${response.status}`);
       }
 
-      let rawJson = response.text.trim();
-      if (rawJson.startsWith('```')) {
-        rawJson = rawJson.replace(/^```(json)?\n?/i, '').replace(/\n?```$/i, '');
+      if (!data.advice) {
+        throw new Error("Received an empty advice payload.");
       }
 
-      const result = JSON.parse(rawJson) as AdviceResponse;
       setAdvice({
-        scale_delta: Math.max(-2, Math.min(2, Number(result.scale_delta) || 0)),
-        rationale: result.rationale || "No rationale provided by model.",
-        cost_impact_usd: Number(result.cost_impact_usd) || 0,
-        bottleneck_warning: result.bottleneck_warning || "None"
+        scale_delta: Math.max(-2, Math.min(2, Number(data.advice.scale_delta) || 0)),
+        rationale: data.advice.rationale || "No rationale provided by model.",
+        cost_impact_usd: Number(data.advice.cost_impact_usd) || 0,
+        bottleneck_warning: data.advice.bottleneck_warning || "None"
       });
       
     } catch (err: any) {
       console.error(err);
       const errorMessage = err?.message || "";
       if ((errorMessage.includes("429")) || err?.status === "RESOURCE_EXHAUSTED" || errorMessage.toLowerCase().includes("quota")) {
-        // Fallback to a mock simulation response if the API quota is exhausted
-        setAdvice({
-          scale_delta: metrics.cpu_utilization > 0.8 ? 2 : metrics.cpu_utilization < 0.2 ? -1 : 0,
-          rationale: `[MOCK FALLBACK - API QUOTA EXCEEDED] Based on the CPU utilization of ${(metrics.cpu_utilization * 100).toFixed(0)}% and latency of ${metrics.latency_ms}ms, the system indicates a ${metrics.cpu_utilization > 0.8 ? 'scale-up' : metrics.cpu_utilization < 0.2 ? 'scale-down' : 'hold'} operation is optimal to meet SLA targets while optimizing cost.`,
-          cost_impact_usd: metrics.cpu_utilization > 0.8 ? 2.50 : metrics.cpu_utilization < 0.2 ? -1.25 : 0.00,
-          bottleneck_warning: metrics.latency_ms > 500 ? "High Latency Detected: Requests may be dropping." : metrics.cpu_utilization > 0.9 ? "CPU Saturation Imminent." : "None"
-        });
+        setAdvice(createFallbackAdvice(metrics));
+        setError(null);
+      } else if (errorMessage.toLowerCase().includes("network") || errorMessage.toLowerCase().includes("fetch")) {
+        setAdvice(createFallbackAdvice(metrics));
         setError(null);
       } else {
         setError(errorMessage || "Failed to generate scaling advice.");
@@ -224,7 +203,7 @@ export default function App() {
                         <Cpu className="w-8 h-8 text-indigo-600" />
                      </div>
                      <p className="mt-8 text-[10px] text-indigo-600 font-mono font-bold tracking-[0.2em] uppercase animate-pulse">RUNNING INFERENCE...</p>
-                    <p className="text-xs text-slate-400 font-medium mt-2">Model: {GEMINI_MODEL}</p>
+                    <p className="text-xs text-slate-400 font-medium mt-2">Model: {GEMINI_MODEL} via Firebase</p>
                   </motion.div>
                ) : error ? (
                  <motion.div key="error" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center w-full p-6 bg-red-50 rounded-3xl border border-red-100">
