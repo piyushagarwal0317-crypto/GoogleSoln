@@ -27,20 +27,20 @@ This prototype replaces traditional, rigid threshold-based scaling with intellig
 1. Clone this repository.
 2. Run `npm install` to install dependencies.
 3. Create a `.env` file in the root directory and add your Gemini API Key:
-   `GEMINI_API_KEY=your_api_key_here`
+   `VITE_GEMINI_API_KEY=your_api_key_here`
 4. Run `npm run dev` to start the local development server.
 
 ## 🔧 Configuration & API Usage
 
 ### Changing the Gemini Model
-By default, the application is configured to use the `gemini-3-flash-preview` model for fast, cost-effective inference. 
-To change the model (e.g., to `gemini-1.5-pro` or a newer version):
+By default, the application is configured to use the `gemini-2.5-flash` model for fast, cost-effective inference. 
+To change the model (e.g., to `gemini-2.5-pro` or a newer version):
 1. Open `/src/App.tsx`.
 2. Locate the `ai.models.generateContent` call inside the `handleGenerateAdvice` function.
 3. Update the `model` property:
    ```typescript
    const response = await ai.models.generateContent({
-     model: 'gemini-1.5-pro', // Change this value
+   model: 'gemini-2.5-pro', // Change this value
      // ...
    });
    ```

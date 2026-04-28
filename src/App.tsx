@@ -24,6 +24,8 @@ interface AdviceResponse {
   bottleneck_warning: string;
 }
 
+const GEMINI_MODEL = "gemini-2.5-flash";
+
 export default function App() {
   const [metrics, setMetrics] = useState<MetricsPayload>(DEFAULT_METRICS);
   const [loading, setLoading] = useState(false);
@@ -46,15 +48,16 @@ export default function App() {
     setError(null);
     setAdvice(null);
     try {
-      if (!process.env.GEMINI_API_KEY) {
-         throw new Error("GEMINI_API_KEY environment variable is missing.");
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("VITE_GEMINI_API_KEY environment variable is missing.");
       }
       
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const payloadString = JSON.stringify(metrics, null, 2);
       
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: GEMINI_MODEL,
         contents: `Autoscaling state JSON:\n${payloadString}`,
         config: {
           systemInstruction: "You are an SRE autoscaling copilot. Your task is to analyze the cloud infrastructure metrics provided in JSON and decide exactly ONE action for pod scaling. Always respond in JSON format with keys 'scale_delta', 'rationale', 'cost_impact_usd', and 'bottleneck_warning'. The 'scale_delta' must be an integer indicating how many pods to add or remove, clamped strictly within [-2, -1, 0, 1, 2]. Evaluate the financial impact of this decision and provide a short warning if any metric indicates an impending bottleneck.",
@@ -103,7 +106,8 @@ export default function App() {
       
     } catch (err: any) {
       console.error(err);
-      if (err.message && err.message.includes("429") || err.status === "RESOURCE_EXHAUSTED" || (err.message && err.message.includes("quota"))) {
+      const errorMessage = err?.message || "";
+      if ((errorMessage.includes("429")) || err?.status === "RESOURCE_EXHAUSTED" || errorMessage.toLowerCase().includes("quota")) {
         // Fallback to a mock simulation response if the API quota is exhausted
         setAdvice({
           scale_delta: metrics.cpu_utilization > 0.8 ? 2 : metrics.cpu_utilization < 0.2 ? -1 : 0,
@@ -113,7 +117,7 @@ export default function App() {
         });
         setError(null);
       } else {
-        setError(err.message || "Failed to generate scaling advice.");
+        setError(errorMessage || "Failed to generate scaling advice.");
       }
     } finally {
       setLoading(false);
@@ -220,7 +224,7 @@ export default function App() {
                         <Cpu className="w-8 h-8 text-indigo-600" />
                      </div>
                      <p className="mt-8 text-[10px] text-indigo-600 font-mono font-bold tracking-[0.2em] uppercase animate-pulse">RUNNING INFERENCE...</p>
-                     <p className="text-xs text-slate-400 font-medium mt-2">Model: gemini-3-flash-preview</p>
+                    <p className="text-xs text-slate-400 font-medium mt-2">Model: {GEMINI_MODEL}</p>
                   </motion.div>
                ) : error ? (
                  <motion.div key="error" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center w-full p-6 bg-red-50 rounded-3xl border border-red-100">
