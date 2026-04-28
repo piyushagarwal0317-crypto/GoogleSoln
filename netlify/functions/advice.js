@@ -1,5 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
 const MODEL = "gemini-2.5-flash";
 
 function normalizeMetrics(body) {
@@ -92,8 +90,27 @@ export const handler = async (event) => {
       }),
     };
   }
-
   try {
+    // Load the GenAI SDK dynamically so a missing module doesn't prevent the function
+    // from starting. If the import fails, we'll fall back to deterministic advice.
+    let GoogleGenAI, Type;
+    try {
+      const genai = await import('@google/genai');
+      GoogleGenAI = genai.GoogleGenAI;
+      Type = genai.Type;
+    } catch (impErr) {
+      const message = String(impErr?.message || impErr);
+      const fallback = createFallbackAdvice(metrics);
+      return {
+        statusCode: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+        body: JSON.stringify({ advice: fallback, model: MODEL, fallback: true, error: `SDK import failed: ${message}` }),
+      };
+    }
+
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: MODEL,
