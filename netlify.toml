@@ -5,9 +5,16 @@
   command = "npm run build"
   # This is the directory that contains the built site.
   publish = "dist"
+  # Netlify Functions live alongside the site build.
+  functions = "netlify/functions"
 
 # This is the magic rule that fixes the "Page Not Found" error for single-page apps.
 # It tells Netlify to redirect all requests to index.html.
+[[redirects]]
+  from = "/api/advice"
+  to = "/.netlify/functions/advice"
+  status = 200
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
