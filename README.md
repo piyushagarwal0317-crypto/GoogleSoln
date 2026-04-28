@@ -27,8 +27,30 @@ This prototype replaces traditional, rigid threshold-based scaling with intellig
 1. Clone this repository.
 2. Run `npm install` to install dependencies.
 3. Create a `.env` file in the root directory and add your Gemini API Key:
-   `VITE_GEMINI_API_KEY=your_api_key_here`
+   `GEMINI_API_KEY=your_api_key_here`
 4. Run `npm run dev` to start the local development server.
+
+## 🔧 Configuration & API Usage
+
+### Changing the Gemini Model
+By default, the application is configured to use the `gemini-3-flash-preview` model for fast, cost-effective inference. 
+To change the model (e.g., to `gemini-1.5-pro` or a newer version):
+1. Open `/src/App.tsx`.
+2. Locate the `ai.models.generateContent` call inside the `handleGenerateAdvice` function.
+3. Update the `model` property:
+   ```typescript
+   const response = await ai.models.generateContent({
+     model: 'gemini-1.5-pro', // Change this value
+     // ...
+   });
+   ```
+
+### Handling API Quota Limits (Error 429)
+The Gemini API provides limited quota for free tiers, which may occasionally result in a `RESOURCE_EXHAUSTED` (Error 429) message. 
+To ensure uninterrupted presentation and testing, the application includes a **graceful fallback mechanism**. 
+If the API quota is exhausted, the system automatically swallows the error and generates a deterministic mock response based on fundamental heuristics (e.g., CPU > 80% = Scale Up). 
+
+You can view, customize, or disable this safety net inside the `catch (err)` block of `/src/App.tsx`.
 
 ## 🔮 Future Implementations (Next Steps)
 * **Kubernetes Webhooks:** Connect the AI output directly to the Kubernetes HPA (Horizontal Pod Autoscaler) to make the scaling fully autonomous.

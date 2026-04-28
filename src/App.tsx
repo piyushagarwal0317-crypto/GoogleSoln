@@ -3,9 +3,6 @@ import { Activity, AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, Cpu, S
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
-// Initialize Gemini (API Key injected by AI Studio Vite config)
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
-
 interface MetricsPayload {
   cpu_utilization: number;
   latency_ms: number;
@@ -53,10 +50,11 @@ export default function App() {
          throw new Error("GEMINI_API_KEY environment variable is missing.");
       }
       
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const payloadString = JSON.stringify(metrics, null, 2);
       
       const response = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
+        model: 'gemini-3-flash-preview',
         contents: `Autoscaling state JSON:\n${payloadString}`,
         config: {
           systemInstruction: "You are an SRE autoscaling copilot. Your task is to analyze the cloud infrastructure metrics provided in JSON and decide exactly ONE action for pod scaling. Always respond in JSON format with keys 'scale_delta', 'rationale', 'cost_impact_usd', and 'bottleneck_warning'. The 'scale_delta' must be an integer indicating how many pods to add or remove, clamped strictly within [-2, -1, 0, 1, 2]. Evaluate the financial impact of this decision and provide a short warning if any metric indicates an impending bottleneck.",
@@ -90,18 +88,33 @@ export default function App() {
         throw new Error("Received empty response from AI model.");
       }
 
-      const rawJson = response.text.trim();
+      let rawJson = response.text.trim();
+      if (rawJson.startsWith('```')) {
+        rawJson = rawJson.replace(/^```(json)?\n?/i, '').replace(/\n?```$/i, '');
+      }
+
       const result = JSON.parse(rawJson) as AdviceResponse;
       setAdvice({
-        scale_delta: Math.max(-2, Math.min(2, result.scale_delta || 0)),
+        scale_delta: Math.max(-2, Math.min(2, Number(result.scale_delta) || 0)),
         rationale: result.rationale || "No rationale provided by model.",
-        cost_impact_usd: result.cost_impact_usd || 0,
+        cost_impact_usd: Number(result.cost_impact_usd) || 0,
         bottleneck_warning: result.bottleneck_warning || "None"
       });
       
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to generate scaling advice.");
+      if (err.message && err.message.includes("429") || err.status === "RESOURCE_EXHAUSTED" || (err.message && err.message.includes("quota"))) {
+        // Fallback to a mock simulation response if the API quota is exhausted
+        setAdvice({
+          scale_delta: metrics.cpu_utilization > 0.8 ? 2 : metrics.cpu_utilization < 0.2 ? -1 : 0,
+          rationale: `[MOCK FALLBACK - API QUOTA EXCEEDED] Based on the CPU utilization of ${(metrics.cpu_utilization * 100).toFixed(0)}% and latency of ${metrics.latency_ms}ms, the system indicates a ${metrics.cpu_utilization > 0.8 ? 'scale-up' : metrics.cpu_utilization < 0.2 ? 'scale-down' : 'hold'} operation is optimal to meet SLA targets while optimizing cost.`,
+          cost_impact_usd: metrics.cpu_utilization > 0.8 ? 2.50 : metrics.cpu_utilization < 0.2 ? -1.25 : 0.00,
+          bottleneck_warning: metrics.latency_ms > 500 ? "High Latency Detected: Requests may be dropping." : metrics.cpu_utilization > 0.9 ? "CPU Saturation Imminent." : "None"
+        });
+        setError(null);
+      } else {
+        setError(err.message || "Failed to generate scaling advice.");
+      }
     } finally {
       setLoading(false);
     }
@@ -207,7 +220,7 @@ export default function App() {
                         <Cpu className="w-8 h-8 text-indigo-600" />
                      </div>
                      <p className="mt-8 text-[10px] text-indigo-600 font-mono font-bold tracking-[0.2em] uppercase animate-pulse">RUNNING INFERENCE...</p>
-                     <p className="text-xs text-slate-400 font-medium mt-2">Model: gemini-3.1-pro-preview</p>
+                     <p className="text-xs text-slate-400 font-medium mt-2">Model: gemini-3-flash-preview</p>
                   </motion.div>
                ) : error ? (
                  <motion.div key="error" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="text-center w-full p-6 bg-red-50 rounded-3xl border border-red-100">
@@ -265,7 +278,7 @@ export default function App() {
                            <div className="bg-indigo-50 p-5 rounded-3xl border border-indigo-100 h-full flex flex-col justify-center items-center text-center">
                              <span className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest block mb-2">Est. Hourly Impact</span>
                              <span className={`text-2xl font-bold ${advice.cost_impact_usd > 0 ? 'text-red-500' : advice.cost_impact_usd < 0 ? 'text-emerald-500' : 'text-slate-500'}`}>
-                               {advice.cost_impact_usd > 0 ? '+' : ''}${advice.cost_impact_usd.toFixed(2)}
+                               {advice.cost_impact_usd > 0 ? '+ ' : advice.cost_impact_usd < 0 ? '- ' : ''}${Math.abs(advice.cost_impact_usd).toFixed(2)}
                              </span>
                            </div>
                         </div>
