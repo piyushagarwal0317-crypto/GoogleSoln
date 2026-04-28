@@ -69,13 +69,26 @@ export default function App() {
         body: JSON.stringify(metrics),
       });
 
-      const data = (await response.json()) as AdviceApiResponse;
+      const contentType = response.headers.get("content-type") || "";
+      let data: AdviceApiResponse | null = null;
 
-      if (!response.ok) {
-        throw new Error(data.error || `Request failed with status ${response.status}`);
+      if (contentType.includes("application/json")) {
+        try {
+          data = (await response.json()) as AdviceApiResponse;
+        } catch (parseErr: any) {
+          const text = await response.text();
+          throw new Error("Invalid JSON from /api/advice: " + (text || String(parseErr)).slice(0, 1000));
+        }
+      } else {
+        const text = await response.text();
+        throw new Error("Non-JSON response from /api/advice: " + (text || "<no body>").slice(0, 1000));
       }
 
-      if (!data.advice) {
+      if (!response.ok) {
+        throw new Error(data?.error || `Request failed with status ${response.status}`);
+      }
+
+      if (!data?.advice) {
         throw new Error("Received an empty advice payload.");
       }
 
@@ -83,7 +96,7 @@ export default function App() {
         scale_delta: Math.max(-2, Math.min(2, Number(data.advice.scale_delta) || 0)),
         rationale: data.advice.rationale || "No rationale provided by model.",
         cost_impact_usd: Number(data.advice.cost_impact_usd) || 0,
-        bottleneck_warning: data.advice.bottleneck_warning || "None"
+        bottleneck_warning: data.advice.bottleneck_warning || "None",
       });
       
     } catch (err: any) {
@@ -225,6 +238,9 @@ export default function App() {
                           <span className="text-[80px] leading-none font-light tracking-tighter text-indigo-600">
                             {advice.scale_delta > 0 ? `+${advice.scale_delta}` : advice.scale_delta}
                           </span>
+                          <div className="text-sm text-slate-500 mt-2">
+                            Projected pods: <span className="font-mono font-bold">{Number(metrics.active_pods) + Number(advice.scale_delta)}</span>
+                          </div>
                           <div className="flex flex-col items-start gap-2">
                              <span className="text-lg font-bold text-slate-900 tracking-tight uppercase">PODS</span>
                              {advice.scale_delta > 0 ? (
